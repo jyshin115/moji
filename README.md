@@ -1,6 +1,6 @@
-# Team 3 — 영세사업장 지원사업 매칭 서비스
+# MOJI — 모두의 지원금
 
-> KAIST BIZ.69911 AI-Driven Business Evolution | 2026 Fall
+> KAIST BIZ.69911 AI-Driven Business Evolution | 2026 Fall | Team 3
 
 5인 미만 영세사업장 대표가 신청 가능한 지원사업 공고를 찾고, 마감 전 알림을 받고, 사업계획서 초안까지 받아 혼자 신청을 끝낼 수 있게 돕는 서비스.
 
