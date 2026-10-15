@@ -1,4 +1,4 @@
-# MOJI — 모두의 지원금
+# 모두의 지원금 (MOJI)
 
 > KAIST BIZ.69911 AI-Driven Business Evolution | 2026 Fall | Team 3
 
