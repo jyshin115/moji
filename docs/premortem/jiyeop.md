@@ -2,7 +2,7 @@
 
 Team: 3조
 Written on: 2026-09-23
-I wrote this before reading anyone else's list: yes
+I wrote this before reading anyone else's list: yes.
 
 ## The premise
 
