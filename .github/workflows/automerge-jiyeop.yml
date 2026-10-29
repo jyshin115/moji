@@ -1,0 +1,32 @@
+# 지엽님(jyshin115) PR 중 본인 파일만 변경한 것은 자동 merge.
+# 다른 파일이 섞인 PR은 사람이 검토해야 하므로 보류 코멘트만 남긴다.
+name: 지엽님 PR 자동 merge (HW6 마감 지원용)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    if: github.event.pull_request.user.login == 'jyshin115'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 본인 파일만 변경했는지 확인 후 merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          files=$(gh pr view "$PR" --repo "$REPO" --json files -q '.files[].path')
+          echo "변경 파일:"; echo "$files"
+          bad=$(echo "$files" | grep -vE '^(docs/whytree/jiyeop|docs/specs/jiyeop|docs/premortem/jiyeop|prototypes/jiyeop/)' || true)
+          if [ -n "$bad" ]; then
+            echo "본인 파일 외 변경이 있어 자동 merge하지 않습니다:"; echo "$bad"
+            gh pr comment "$PR" --repo "$REPO" --body "자동 merge 보류: 본인 파일(docs/*/jiyeop*, prototypes/jiyeop/) 외 변경이 포함돼 있어요. 승찬님이 직접 확인 후 merge합니다."
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$REPO" --merge
