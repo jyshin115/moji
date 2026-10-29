@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOJI — 세무 자료로 자동 채우기 (chanyang 프로토타입)</title>
+<style>
+  body { font-family: system-ui, "Malgun Gothic", sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #1f2a2e; background: #faf8f3; }
+  h1 { font-size: 20px; color: #2f6b4f; }
+  .note { font-size: 13px; color: #4a5568; }
+  .box { background: #fff; border: 1px solid #c9c4b6; border-radius: 6px; padding: 14px; margin: 12px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; vertical-align: middle; font-size: 14px; }
+  .src { font-size: 12px; color: #4a5568; }
+  .need { color: #b45309; font-weight: bold; font-size: 12px; }
+  .edited { color: #2f6b4f; font-weight: bold; }
+  input[type=number], select { width: 120px; padding: 4px; }
+  button { padding: 6px 12px; cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  pre { background: #1f2a2e; color: #e6f2ea; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  .warn { color: #b45309; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>세무 자료로 사업장 정보 자동 채우기</h1>
+<p class="note">스펙: <code>docs/specs/chanyang-taxprefill.md</code> P0. 아래 사업장은 모두 <b>합성 샘플</b>이다 (실제 거래처 아님). 기준일: <span id="today"></span></p>
+
+<div class="box">
+  <label>샘플 사업장:
+    <select id="sample">
+      <option value="A">A 골목식당 (정상)</option>
+      <option value="B">B 동네꽃집 (자료 누락)</option>
+      <option value="C">C 바른수학학원 (면세사업자)</option>
+    </select>
+  </label>
+  <p><label><input type="checkbox" id="consent"> 세무법인이 가진 내 자료로 정보를 채우는 데 동의합니다.</label></p>
+</div>
+
+<div id="form" class="box hidden">
+  <table>
+    <thead><tr><th>항목</th><th>값</th><th>출처</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p><button id="confirm">이대로 확인</button> <span id="blocked" class="warn"></span></p>
+</div>
+
+<div id="out" class="hidden">
+  <p>판정 입력용 프로필 (희진 님 판정 입력과 같은 단위):</p>
+  <pre id="json"></pre>
+</div>
+
+<script>
+// 기준일. 스펙 7절 기대값은 2026-10-29 기준이다. ?today=YYYY-MM-DD 로 바꿔 볼 수 있다.
+const now = new Date();
+const TODAY = new URLSearchParams(location.search).get("today")
+  || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+document.getElementById("today").textContent = TODAY;
+
+// 합성 세무 자료 묶음. 세무 프로그램에서 거래처 자료를 뽑았다고 가정한 형태.
+const SAMPLES = {
+  A: {
+    name: "골목식당",
+    registration: { openDate: "2023-03-15", address: "서울특별시 마포구 망원로 12", businessTypes: ["음식점업"], taxType: "과세" },
+    vat: { year: 2025, first: 120000000, second: 100000000 },
+    siteReport: null,
+    employment: { months: ["2025-10","2025-11","2025-12","2026-01","2026-02","2026-03","2026-04","2026-05","2026-06","2026-07","2026-08","2026-09"],
+                  headcount: [2,2,3,3,3,3,4,4,4,3,3,3] }, // 대표 제외 고용보험 피보험자 월말 인원
+  },
+  B: {
+    name: "동네꽃집",
+    registration: { openDate: "2025-08-01", address: "경기도 수원시 팔달구 정조로 7", businessTypes: ["도매 및 소매업", "서비스업"], taxType: "과세" },
+    vat: { year: 2025, first: null, second: 45000000 },
+    siteReport: null,
+    employment: null, // 4대보험 자료 없음
+  },
+  C: {
+    name: "바른수학학원",
+    registration: { openDate: "2021-01-10", address: "부산광역시 해운대구 센텀로 3", businessTypes: ["교육서비스업"], taxType: "면세" },
+    vat: null,
+    siteReport: { year: 2025, revenue: 180000000 },
+    employment: { months: ["2025-10","2025-11","2025-12","2026-01","2026-02","2026-03","2026-04","2026-05","2026-06","2026-07","2026-08","2026-09"],
+                  headcount: [4,4,4,5,5,4,4,4,4,4,4,4] },
+  },
+};
+
+const INDUSTRIES = ["음식점", "제조", "도소매", "서비스업"];
+const REGIONS = ["서울", "경기", "부산", "기타"];
+const FIELDS = [
+  { key: "industry", label: "업종" },
+  { key: "region", label: "지역" },
+  { key: "months", label: "업력 (개월)" },
+  { key: "sales", label: "연매출 (억 원)" },
+  { key: "workers", label: "상시근로자 수 (명)" },
+];
+
+// ---- 채우기 규칙 (스펙 2절 표) ----
+function mapIndustry(type) {
+  if (type.includes("음식")) return "음식점";
+  if (type.includes("제조")) return "제조";
+  if (type.includes("도매") || type.includes("소매")) return "도소매";
+  return "서비스업";
+}
+
+function mapRegion(address) {
+  const first = (address || "").split(" ")[0];
+  if (first.startsWith("서울")) return "서울";
+  if (first.startsWith("경기")) return "경기";
+  if (first.startsWith("부산")) return "부산";
+  return "기타";
+}
+
+function monthsBetween(from, to) {
+  const a = new Date(from), b = new Date(to);
+  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+  if (b.getDate() < a.getDate()) m -= 1; // 한 달이 다 차지 않았으면 내림
+  return m;
+}
+
+function isStale(year) {
+  // 직전 연도 자료까지만 최신으로 본다. 그보다 오래되면 1년이 넘은 자료다.
+  return year < new Date(TODAY).getFullYear() - 1;
+}
+
+function prefill(s) {
+  const r = s.registration || {};
+  const f = {};
+
+  const types = r.businessTypes || [];
+  f.industry = types.length === 0
+    ? { value: null, source: "사업자등록 업태 없음", need: true }
+    : { value: mapIndustry(types[0]), source: `사업자등록 주업태 '${types[0]}'`, need: types.length > 1,
+        why: types.length > 1 ? `업태가 ${types.length}개 (${types.join(", ")})` : "" };
+
+  f.region = r.address
+    ? { value: mapRegion(r.address), source: `사업장 소재지 '${r.address}'`, need: false }
+    : { value: null, source: "소재지 없음", need: true };
+
+  f.months = r.openDate
+    ? { value: monthsBetween(r.openDate, TODAY), source: `개업일 ${r.openDate}`, need: false }
+    : { value: null, source: "개업일 없음", need: true };
+
+  if (r.taxType === "면세") {
+    const sr = s.siteReport;
+    f.sales = !sr
+      ? { value: null, source: "사업장현황신고 자료 없음", need: true }
+      : { value: sr.revenue / 1e8, source: `${sr.year} 사업장현황신고 수입금액`, need: isStale(sr.year),
+          why: isStale(sr.year) ? "1년 넘은 자료" : "" };
+  } else {
+    const v = s.vat;
+    if (!v) f.sales = { value: null, source: "부가세 신고 자료 없음", need: true };
+    else if (v.first == null || v.second == null) {
+      const part = (v.first || 0) + (v.second || 0);
+      f.sales = { value: part / 1e8, source: `${v.year} 부가세 ${v.first == null ? "2기" : "1기"}만 있음`, need: true,
+                  why: "1기·2기 중 하나만 있음 (연 일부)" };
+    } else {
+      f.sales = { value: (v.first + v.second) / 1e8, source: `${v.year} 부가세 과세표준 1기+2기`, need: isStale(v.year),
+                  why: isStale(v.year) ? "1년 넘은 자료" : "" };
+    }
+  }
+
+  const e = s.employment;
+  if (!e || !e.headcount || e.headcount.length === 0) {
+    // 0으로 채우지 않는다. 0이면 "5인 미만"이 거짓으로 통과한다.
+    f.workers = { value: null, source: "4대보험(고용보험) 자료 없음", need: true };
+  } else {
+    const sum = e.headcount.reduce((a, b) => a + b, 0);
+    const avg = sum / e.headcount.length;
+    f.workers = { value: Math.floor(avg), source: `고용보험 ${e.months[0]}~${e.months[e.months.length - 1]} 월말 인원 평균 (${sum}÷${e.headcount.length}=${avg.toFixed(2)})`,
+                  need: e.headcount.length < 12, why: e.headcount.length < 12 ? "12개월이 안 됨" : "" };
+  }
+  return f;
+}
+
+// ---- 화면 ----
+let state = null;
+
+function inputFor(key, value) {
+  if (key === "industry" || key === "region") {
+    const opts = key === "industry" ? INDUSTRIES : REGIONS;
+    return `<select data-key="${key}"><option value="">선택</option>${opts.map(o => `<option ${o === value ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+  }
+  const step = key === "sales" ? "0.1" : "1";
+  return `<input type="number" min="0" step="${step}" data-key="${key}" value="${value ?? ""}">`;
+}
+
+function render() {
+  const rows = FIELDS.map(({ key, label }) => {
+    const c = state[key];
+    const srcClass = c.source === "대표 수정" ? "src edited" : "src";
+    const need = c.need ? `<div class="need">확인 필요${c.why ? " — " + c.why : ""}</div>` : "";
+    const ok = c.need && c.value != null ? `<button data-ok="${key}">맞아요</button>` : "";
+    return `<tr><td>${label}</td><td>${inputFor(key, c.value)}${need}</td><td class="${srcClass}">${c.source}</td><td>${ok}</td></tr>`;
+  }).join("");
+  document.getElementById("rows").innerHTML = rows;
+
+  document.querySelectorAll("[data-key]").forEach(el => el.addEventListener("change", ev => {
+    const key = ev.target.dataset.key;
+    const raw = ev.target.value;
+    const value = raw === "" ? null : (key === "industry" || key === "region" ? raw : Number(raw));
+    state[key] = { value, source: "대표 수정", need: value == null };
+    hideOutput();
+    render();
+  }));
+  document.querySelectorAll("[data-ok]").forEach(el => el.addEventListener("click", ev => {
+    state[ev.target.dataset.ok].need = false;
+    hideOutput();
+    render();
+  }));
+
+  const pending = FIELDS.filter(f => state[f.key].need || state[f.key].value == null).map(f => f.label);
+  document.getElementById("confirm").disabled = pending.length > 0;
+  document.getElementById("blocked").textContent = pending.length ? `확인이 남은 칸: ${pending.join(", ")}` : "";
+}
+
+function hideOutput() { document.getElementById("out").classList.add("hidden"); }
+
+function load() {
+  const consent = document.getElementById("consent").checked;
+  document.getElementById("form").classList.toggle("hidden", !consent);
+  hideOutput();
+  if (!consent) { state = null; document.getElementById("rows").innerHTML = ""; return; }
+  state = prefill(SAMPLES[document.getElementById("sample").value]);
+  render();
+}
+
+document.getElementById("consent").addEventListener("change", load);
+document.getElementById("sample").addEventListener("change", load);
+document.getElementById("confirm").addEventListener("click", () => {
+  const s = SAMPLES[document.getElementById("sample").value];
+  const profile = { business: s.name, asOf: TODAY };
+  FIELDS.forEach(({ key }) => { profile[key] = state[key].value; });
+  profile.sources = Object.fromEntries(FIELDS.map(({ key }) => [key, state[key].source]));
+  document.getElementById("json").textContent = JSON.stringify(profile, null, 2);
+  document.getElementById("out").classList.remove("hidden");
+});
+load();
+</script>
+</body>
+</html>
