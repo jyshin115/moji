@@ -11,7 +11,7 @@
 | 박승찬 | 제품 설계·MVP 구현 | [@scpark0524](https://github.com/scpark0524) |
 | 정찬양 | 현장 검증·세무 데이터 | [@JC0623](https://github.com/JC0623) |
 | 신지엽 | 사업계획서 검수·시장 분석 | [@jyshin115](https://github.com/jyshin115) |
-| 신희진 | 인프라·데이터 파이프라인 | [@zzangparty-blip](https://github.com/zzangparty-blip) |
+| 신희진 | 인프라·데이터 파이프라인 | [@heejin-shin-2026](https://github.com/heejin-shin-2026) |
 
 ## Project Documents
 
