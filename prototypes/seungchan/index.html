@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOJI 공고 매칭</title>
+<style>
+  :root {
+    --green: #2c5f2d; --green-soft: #e8f0e8; --ink: #1f2a2e; --muted: #6b7a74;
+    --line: #d9e2dc; --bg: #f7faf8; --card: #ffffff; --warn: #b4541e; --warn-bg: #fdf0e7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: "Apple SD Gothic Neo", "Pretendard", "Malgun Gothic", sans-serif; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  header h1 { font-size: 22px; margin: 0; color: var(--green); }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 20px; }
+  form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 480px) { form .row { grid-template-columns: 1fr; } }
+  label { display: block; font-size: 13px; font-weight: 700; margin: 10px 0 4px; }
+  select, input { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 15px; background: #fff; }
+  button { width: 100%; margin-top: 18px; padding: 13px; border: 0; border-radius: 8px;
+           background: var(--green); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  h2 { font-size: 16px; margin: 28px 0 10px; }
+  h2 .count { color: var(--muted); font-weight: 400; }
+  .ann { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 10px; }
+  .ann .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .ann h3 { font-size: 15px; margin: 0; }
+  .ann .org { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .ann .meta { font-size: 13px; margin-top: 8px; }
+  .ann a { color: var(--green); }
+  .badge { flex: none; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); }
+  .badge.soon { background: var(--warn-bg); color: var(--warn); }
+  .badge.closed { background: #eceeed; color: var(--muted); }
+  .ann.blocked { background: #fbfcfb; }
+  .ann.blocked h3 { color: var(--muted); }
+  .reasons { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--warn); }
+  .empty { color: var(--muted); font-size: 14px; padding: 12px 2px; }
+  footer { margin-top: 36px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MOJI — 모두의 지원금</h1>
+    <p>사업장 정보를 한 번 넣으면, 지금 신청할 수 있는 공고가 어디에 있고 언제까지인지 알려드립니다.</p>
+  </header>
+
+  <div class="card">
+    <form id="form">
+      <div class="row">
+        <div>
+          <label for="industry">업종</label>
+          <select id="industry" required>
+            <option value="">선택하세요</option>
+          </select>
+        </div>
+        <div>
+          <label for="region">소재지 (시·도)</label>
+          <select id="region" required>
+            <option value="">선택하세요</option>
+          </select>
+        </div>
+        <div>
+          <label for="employees">상시근로자 수 (대표 제외, 명)</label>
+          <input id="employees" type="number" min="0" max="999" required placeholder="예: 2 (혼자면 0)">
+        </div>
+        <div>
+          <label for="openYear">개업연도</label>
+          <input id="openYear" type="number" min="1950" max="2026" required placeholder="예: 2023">
+        </div>
+      </div>
+      <button type="submit">신청 가능 공고 찾기</button>
+    </form>
+  </div>
+
+  <div id="results"></div>
+
+  <footer>
+    프로토타입 안내: 공고 10건은 실제 지원사업 구조를 참고한 샘플 데이터입니다.
+    자격 판정은 공고에 명시된 조건의 AND 결합이며, 최종 자격은 반드시 공고 원문에서 확인하세요.
+    선정 가능성 예측은 제공하지 않습니다.
+  </footer>
+</div>
+
+<script id="logic">
+// ---- 순수 로직 (DOM 없음: node로도 테스트 가능) ----
+var INDUSTRIES = ["음식점·숙박업","도매·소매업","제조업","정보통신업","교육서비스업",
+                  "보건·복지업","운수·물류업","개인서비스업","기타"];
+var REGIONS = ["서울","부산","대구","인천","광주","대전","울산","세종","경기","강원",
+               "충북","충남","전북","전남","경북","경남","제주"];
+
+// 샘플 공고 (실제 지원사업 구조 참고). 조건이 null이면 "제한 없음".
+var ANNS = [
+  { id: 1, title: "소상공인 정책자금 (일반경영안정자금)", org: "소상공인시장진흥공단",
+    deadline: "2026-12-18", regions: null, industries: null, employeesUnder: 5, minYears: null,
+    link: "https://www.sbiz24.kr", note: "운영자금 최대 7천만 원, 저금리 대출" },
+  { id: 2, title: "스마트상점 기술보급 사업", org: "소상공인시장진흥공단",
+    deadline: "2026-11-14", regions: null,
+    industries: ["음식점·숙박업","도매·소매업","개인서비스업"], employeesUnder: 5, minYears: null,
+    link: "https://www.sbiz24.kr", note: "키오스크·테이블오더 등 도입비 최대 70% 지원" },
+  { id: 3, title: "서울시 소상공인 고용장려금", org: "서울신용보증재단",
+    deadline: "2026-11-28", regions: ["서울"], industries: null, employeesUnder: 5, minYears: null,
+    link: "https://www.seoulsbdc.or.kr", note: "신규 채용 1인당 월 100만 원, 최대 6개월" },
+  { id: 4, title: "소상공인 온라인 판로지원 (e커머스 입점)", org: "중소기업유통센터",
+    deadline: "2026-12-05", regions: null,
+    industries: ["도매·소매업","제조업","음식점·숙박업"], employeesUnder: null, minYears: null,
+    link: "https://www.bizinfo.go.kr", note: "온라인 입점 수수료·상세페이지 제작 지원" },
+  { id: 5, title: "백년가게·백년소공인 선정 지원", org: "중소벤처기업부",
+    deadline: "2026-12-30", regions: null, industries: null, employeesUnder: null, minYears: 15,
+    link: "https://www.bizinfo.go.kr", note: "업력 15년 이상 점포 대상, 컨설팅·홍보 지원" },
+  { id: 6, title: "경기도 소상공인 경영환경개선사업", org: "경기도시장상권진흥원",
+    deadline: "2026-11-20", regions: ["경기"], industries: null, employeesUnder: 5, minYears: null,
+    link: "https://gmr.or.kr", note: "간판·인테리어 개선 최대 200만 원" },
+  { id: 7, title: "소공인 특화자금", org: "소상공인시장진흥공단",
+    deadline: "2026-12-10", regions: null, industries: ["제조업"], employeesUnder: 10, minYears: null,
+    link: "https://www.sbiz24.kr", note: "제조 소공인 시설·운전자금" },
+  { id: 8, title: "희망리턴패키지 (경영개선 지원)", org: "소상공인시장진흥공단",
+    deadline: "2026-11-30", regions: null, industries: null, employeesUnder: 5, minYears: null,
+    link: "https://www.sbiz24.kr", note: "경영위기 진단과 개선 비용 최대 2천만 원" },
+  { id: 9, title: "1인 자영업자 고용보험료 지원", org: "근로복지공단",
+    deadline: "2026-12-31", regions: null, industries: null, employeesUnder: 1, minYears: null,
+    link: "https://www.comwel.or.kr", note: "고용원 없는 1인 자영업자 보험료 최대 80% 지원" },
+  { id: 10, title: "소상공인 디지털 전환 바우처", org: "중소벤처기업부",
+    deadline: "2026-10-20", regions: null, industries: null, employeesUnder: 5, minYears: null,
+    link: "https://www.bizinfo.go.kr", note: "디지털 전환 솔루션 바우처 (접수 마감)" }
+];
+
+function daysLeft(deadline, today) {
+  var d = new Date(deadline + "T23:59:59");
+  return Math.floor((d - today) / 86400000);
+}
+
+// 반환: { status: "open"|"blocked"|"closed", reasons: [..] }
+function matchAnnouncement(biz, ann, today) {
+  if (daysLeft(ann.deadline, today) < 0) return { status: "closed", reasons: ["마감됨"] };
+  var reasons = [];
+  if (ann.regions && ann.regions.indexOf(biz.region) === -1)
+    reasons.push("지역 조건(" + ann.regions.join("·") + ") 미충족");
+  if (ann.industries && ann.industries.indexOf(biz.industry) === -1)
+    reasons.push("업종 조건(" + ann.industries.join("·") + ") 미충족");
+  if (ann.employeesUnder !== null && biz.employees >= ann.employeesUnder)
+    reasons.push(ann.employeesUnder === 1
+      ? "고용원이 없는 1인 사업자만 신청 가능"
+      : "상시근로자 " + ann.employeesUnder + "인 미만 조건 미충족");
+  if (ann.minYears !== null && (today.getFullYear() - biz.openYear) < ann.minYears)
+    reasons.push("업력 " + ann.minYears + "년 이상 조건 미충족");
+  return reasons.length ? { status: "blocked", reasons: reasons } : { status: "open", reasons: [] };
+}
+
+function matchAll(biz, anns, today) {
+  var out = { open: [], blocked: [], closed: [] };
+  anns.forEach(function (ann) {
+    var r = matchAnnouncement(biz, ann, today);
+    out[r.status].push({ ann: ann, reasons: r.reasons, dday: daysLeft(ann.deadline, today) });
+  });
+  out.open.sort(function (a, b) { return a.dday - b.dday; }); // 마감 급한 순
+  return out;
+}
+
+if (typeof module !== "undefined") module.exports = { ANNS: ANNS, matchAll: matchAll, matchAnnouncement: matchAnnouncement };
+</script>
+
+<script>
+// ---- 화면 ----
+var $ = function (id) { return document.getElementById(id); };
+INDUSTRIES.forEach(function (v) { $("industry").add(new Option(v, v)); });
+REGIONS.forEach(function (v) { $("region").add(new Option(v, v)); });
+
+function ddayBadge(d) {
+  if (d <= 7) return '<span class="badge soon">마감임박 D-' + d + "</span>";
+  return '<span class="badge">D-' + d + "</span>";
+}
+
+function annCard(item, kind) {
+  var a = item.ann;
+  var badge = kind === "closed" ? '<span class="badge closed">마감됨</span>' : ddayBadge(item.dday);
+  var html = '<div class="ann' + (kind === "open" ? "" : " blocked") + '">'
+    + '<div class="top"><h3>' + a.title + "</h3>" + badge + "</div>"
+    + '<div class="org">' + a.org + " · 마감 " + a.deadline + "</div>"
+    + '<div class="meta">' + a.note + ' · <a href="' + a.link + '" target="_blank" rel="noopener">공고 원문 확인</a></div>';
+  if (kind === "blocked")
+    html += '<ul class="reasons">' + item.reasons.map(function (r) { return "<li>" + r + "</li>"; }).join("") + "</ul>";
+  return html + "</div>";
+}
+
+$("form").addEventListener("submit", function (e) {
+  e.preventDefault();
+  var biz = {
+    industry: $("industry").value,
+    region: $("region").value,
+    employees: parseInt($("employees").value, 10),
+    openYear: parseInt($("openYear").value, 10)
+  };
+  var r = matchAll(biz, ANNS, new Date());
+  var h = '<h2>신청 가능 <span class="count">' + r.open.length + "건</span></h2>";
+  h += r.open.length
+    ? r.open.map(function (i) { return annCard(i, "open"); }).join("")
+    : '<div class="empty">지금 신청 가능한 공고가 없습니다. 조건을 확인해 보세요.</div>';
+  if (r.blocked.length) {
+    h += '<h2>신청 불가 <span class="count">' + r.blocked.length + "건 · 사유를 확인하세요</span></h2>";
+    h += r.blocked.map(function (i) { return annCard(i, "blocked"); }).join("");
+  }
+  if (r.closed.length) {
+    h += '<h2>마감된 공고 <span class="count">' + r.closed.length + "건</span></h2>";
+    h += r.closed.map(function (i) { return annCard(i, "closed"); }).join("");
+  }
+  $("results").innerHTML = h;
+});
+</script>
+</body>
+</html>
